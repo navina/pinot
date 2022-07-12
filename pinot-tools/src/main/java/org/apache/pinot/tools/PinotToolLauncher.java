@@ -41,6 +41,7 @@ public class PinotToolLauncher {
     SUBCOMMAND_MAP.put("QueryRunner", new QueryRunner());
     SUBCOMMAND_MAP.put("PinotFSBenchmarkRunner", new PinotFSBenchmarkRunner());
     SUBCOMMAND_MAP.put("SegmentDump", new SegmentDumpTool());
+    SUBCOMMAND_MAP.put("DictionaryDumper", new DictionaryDumper());
   }
 
   @CommandLine.Option(names = {"-help", "-h", "--h", "--help"}, required = false, help = true,

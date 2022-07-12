@@ -40,5 +40,20 @@ public class StringUtilTest {
     String value = "potato";
     assertSame(StringUtil.sanitizeStringValue(value, 6), value);
     assertSame(StringUtil.sanitizeStringValue(value, 7), value);
+
+    String nullCharacter = "\0";
+    System.out.println("Null character - " + nullCharacter + "\t " + nullCharacter.length());
+    String sanitized = StringUtil.sanitizeStringValue(nullCharacter, 512);
+    System.out.println("Sanitized value - " + sanitized + "\t" + sanitized.length());
+
+    String nullSomething = "\0ABCS";
+    System.out.println("Null character - " + nullSomething + "\t " + nullSomething.length());
+    String sanitizedSomething = StringUtil.sanitizeStringValue(nullSomething, 512);
+    System.out.println("Sanitized value - " + sanitizedSomething + "\t" + sanitizedSomething.length());
+
+    String input = "\0hello\0world";
+    String replaced = input.replaceAll("\0", "");
+    System.out.println(replaced);
+
   }
 }

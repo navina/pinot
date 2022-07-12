@@ -47,6 +47,9 @@ public class SegmentDumpTool extends AbstractBaseCommand implements Command {
   @CommandLine.Option(names = {"-columns"}, arity = "1..*", description = "Columns to dump")
   private List<String> _columnNames;
 
+  @CommandLine.Option(names = {"-docIds"}, arity = "1..*", description = "Columns to dump")
+  private List<Integer> _docIds;
+
   @CommandLine.Option(names = {"-dumpStarTree"})
   private boolean _dumpStarTree = false;
 
@@ -101,27 +104,31 @@ public class SegmentDumpTool extends AbstractBaseCommand implements Command {
     int docId = 0;
 
     while (reader.hasNext()) {
-      System.out.print(docId++ + "\t");
       GenericRow row = reader.next(reuse);
+      if (_docIds.contains(docId)) {
+        System.out.print(docId++ + "\t");
 
-      for (String columnName : _columnNames) {
-        if (!mvColumns.contains(columnName)) {
-          System.out.print(row.getValue(columnName));
-          System.out.print("\t");
-        } else {
-          Object[] values = (Object[]) row.getValue(columnName);
-          System.out.print("[");
+        for (String columnName : _columnNames) {
+          if (!mvColumns.contains(columnName)) {
+            System.out.print(row.getValue(columnName));
+            System.out.print("\t");
+          } else {
+            Object[] values = (Object[]) row.getValue(columnName);
+            System.out.print("[");
 
-          for (int i = 0; i < values.length; i++) {
-            System.out.print(values[i]);
-            if (i < values.length - 1) {
-              System.out.print(", ");
+            for (int i = 0; i < values.length; i++) {
+              System.out.print(values[i]);
+              if (i < values.length - 1) {
+                System.out.print(", ");
+              }
             }
+            System.out.print("]\t");
           }
-          System.out.print("]\t");
         }
+        System.out.println();
+      } else {
+        System.out.println("Skipping docId - " + docId);
       }
-      System.out.println();
       row.clear();
     }
   }

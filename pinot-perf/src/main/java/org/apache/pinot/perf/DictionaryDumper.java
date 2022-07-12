@@ -44,14 +44,22 @@ public class DictionaryDumper {
     for (File indexDir : indexDirs) {
       System.out.println("Loading " + indexDir.getName());
 
-      ImmutableSegment immutableSegment = ImmutableSegmentLoader.load(indexDir, ReadMode.heap);
+      ImmutableSegment immutableSegment = ImmutableSegmentLoader.load(indexDir, ReadMode.mmap);
       Dictionary colDictionary = immutableSegment.getDictionary(args[1]);
-      List<String> strIdList = Arrays.asList(args[2].split(","));
+      if (args[2] != null) {
+        List<String> strIdList = Arrays.asList(args[2].split(","));
 
-      for (String strId : strIdList) {
-        int id = Integer.valueOf(strId);
-        String s = colDictionary.getStringValue(id);
-        System.out.println(String.format("%d -> %s", id, s));
+        for (String strId : strIdList) {
+          int id = Integer.valueOf(strId);
+          String s = colDictionary.getStringValue(id);
+          System.out.println(String.format("%d -> %s", id, s));
+        }
+      } else {
+        int dictLength = colDictionary.length();
+        for (int i = 0; i < dictLength; i++) {
+          String s = colDictionary.getStringValue(i);
+          System.out.println(String.format("%d -> %s", i, s));
+        }
       }
     }
   }

@@ -307,11 +307,11 @@ public abstract class BaseImmutableDictionary implements Dictionary {
     return _valueReader.getBigDecimal(dictId, _numBytesPerValue);
   }
 
-  protected String getUnpaddedString(int dictId, byte[] buffer) {
+  public String getUnpaddedString(int dictId, byte[] buffer) {
     return _valueReader.getUnpaddedString(dictId, _numBytesPerValue, _paddingByte, buffer);
   }
 
-  protected String getPaddedString(int dictId, byte[] buffer) {
+  public String getPaddedString(int dictId, byte[] buffer) {
     return _valueReader.getPaddedString(dictId, _numBytesPerValue, buffer);
   }
 
