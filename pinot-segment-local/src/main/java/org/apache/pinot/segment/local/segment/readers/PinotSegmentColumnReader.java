@@ -28,17 +28,22 @@ import org.apache.pinot.segment.spi.index.reader.Dictionary;
 import org.apache.pinot.segment.spi.index.reader.ForwardIndexReader;
 import org.apache.pinot.segment.spi.index.reader.ForwardIndexReaderContext;
 import org.apache.pinot.segment.spi.index.reader.NullValueVectorReader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 @SuppressWarnings({"rawtypes", "unchecked"})
 public class PinotSegmentColumnReader implements Closeable {
+  private static final Logger LOGGER = LoggerFactory.getLogger(PinotSegmentColumnReader.class);
   private final ForwardIndexReader _forwardIndexReader;
   private final ForwardIndexReaderContext _forwardIndexReaderContext;
   private final Dictionary _dictionary;
   private final NullValueVectorReader _nullValueVectorReader;
   private final int[] _dictIdBuffer;
+  private String _column;
 
   public PinotSegmentColumnReader(IndexSegment indexSegment, String column) {
+    _column = column;
     DataSource dataSource = indexSegment.getDataSource(column);
     Preconditions.checkArgument(dataSource != null, "Failed to find data source for column: %s", column);
     _forwardIndexReader = dataSource.getForwardIndex();
@@ -53,7 +58,8 @@ public class PinotSegmentColumnReader implements Closeable {
   }
 
   public PinotSegmentColumnReader(ForwardIndexReader forwardIndexReader, @Nullable Dictionary dictionary,
-      @Nullable NullValueVectorReader nullValueVectorReader, int maxNumValuesPerMVEntry) {
+      @Nullable NullValueVectorReader nullValueVectorReader, int maxNumValuesPerMVEntry, String columnName) {
+    _column = columnName;
     _forwardIndexReader = forwardIndexReader;
     _forwardIndexReaderContext = _forwardIndexReader.createContext();
     _dictionary = dictionary;
@@ -86,6 +92,7 @@ public class PinotSegmentColumnReader implements Closeable {
       if (_forwardIndexReader.isSingleValue()) {
         return _dictionary.get(_forwardIndexReader.getDictId(docId, _forwardIndexReaderContext));
       } else {
+        LOGGER.info("Get dictionary encoded value for MV column " + _column);
         int numValues = _forwardIndexReader.getDictIdMV(docId, _dictIdBuffer, _forwardIndexReaderContext);
         Object[] values = new Object[numValues];
         for (int i = 0; i < numValues; i++) {
