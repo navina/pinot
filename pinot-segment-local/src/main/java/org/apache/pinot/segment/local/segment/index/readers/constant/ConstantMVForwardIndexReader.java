@@ -45,9 +45,6 @@ public final class ConstantMVForwardIndexReader implements ForwardIndexReader<Fo
 
   @Override
   public int getDictIdMV(int docId, int[] dictIdBuffer, ForwardIndexReaderContext context) {
-    if (dictIdBuffer.length == 0) {
-      return 0;
-    }
     dictIdBuffer[0] = 0;
     return 1;
   }
