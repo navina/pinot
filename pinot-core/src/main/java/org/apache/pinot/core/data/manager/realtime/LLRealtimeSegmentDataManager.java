@@ -47,6 +47,9 @@ import org.apache.pinot.common.restlet.resources.SegmentErrorInfo;
 import org.apache.pinot.common.utils.LLCSegmentName;
 import org.apache.pinot.common.utils.TarGzCompressionUtils;
 import org.apache.pinot.core.data.manager.realtime.RealtimeConsumptionRateManager.ConsumptionRateLimiter;
+import org.apache.pinot.core.data.manager.realtime.processor.MessageProcessor;
+import org.apache.pinot.core.data.manager.realtime.processor.MessageProcessorResult;
+import org.apache.pinot.core.data.manager.realtime.processor.ProcessingContext;
 import org.apache.pinot.segment.local.dedup.PartitionDedupMetadataManager;
 import org.apache.pinot.segment.local.indexsegment.mutable.MutableSegmentImpl;
 import org.apache.pinot.segment.local.realtime.converter.ColumnIndicesForRealtimeTable;
@@ -70,8 +73,6 @@ import org.apache.pinot.spi.config.table.SegmentPartitionConfig;
 import org.apache.pinot.spi.config.table.SegmentZKPropsConfig;
 import org.apache.pinot.spi.config.table.TableConfig;
 import org.apache.pinot.spi.data.Schema;
-import org.apache.pinot.spi.data.readers.GenericRow;
-import org.apache.pinot.spi.metrics.PinotMeter;
 import org.apache.pinot.spi.stream.ConsumerPartitionState;
 import org.apache.pinot.spi.stream.LongMsgOffset;
 import org.apache.pinot.spi.stream.MessageBatch;
@@ -84,10 +85,9 @@ import org.apache.pinot.spi.stream.PermanentConsumerException;
 import org.apache.pinot.spi.stream.RowMetadata;
 import org.apache.pinot.spi.stream.StreamConsumerFactory;
 import org.apache.pinot.spi.stream.StreamConsumerFactoryProvider;
-import org.apache.pinot.spi.stream.StreamDataDecoder;
 import org.apache.pinot.spi.stream.StreamDataDecoderImpl;
-import org.apache.pinot.spi.stream.StreamDataDecoderResult;
 import org.apache.pinot.spi.stream.StreamDecoderProvider;
+import org.apache.pinot.spi.stream.StreamMessage;
 import org.apache.pinot.spi.stream.StreamMessageDecoder;
 import org.apache.pinot.spi.stream.StreamMetadataProvider;
 import org.apache.pinot.spi.stream.StreamPartitionMsgOffset;
@@ -217,7 +217,6 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
   private final SegmentZKMetadata _segmentZKMetadata;
   private final TableConfig _tableConfig;
   private final RealtimeTableDataManager _realtimeTableDataManager;
-  private final StreamDataDecoder _streamDataDecoder;
   private final int _segmentMaxRowCount;
   private final String _resourceDataDir;
   private final IndexLoadingConfig _indexLoadingConfig;
@@ -265,7 +264,6 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
   private final int _partitionGroupId;
   private final PartitionGroupConsumptionStatus _partitionGroupConsumptionStatus;
   final String _clientId;
-  private final TransformPipeline _transformPipeline;
   private PartitionGroupConsumer _partitionGroupConsumer = null;
   private StreamMetadataProvider _partitionMetadataProvider = null;
   private final File _resourceTmpDir;
@@ -295,6 +293,8 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
 
   private final StreamPartitionMsgOffset _latestStreamOffsetAtStartupTime;
   private final CompletionMode _segmentCompletionMode;
+
+  private final MessageProcessor _messageProcessor;
 
   // TODO each time this method is called, we print reason for stop. Good to print only once.
   private boolean endCriteriaReached() {
@@ -521,15 +521,11 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
     int messageCount = messagesAndOffsets.getMessageCount();
     _rateLimiter.throttle(messageCount);
 
-    PinotMeter realtimeRowsConsumedMeter = null;
-    PinotMeter realtimeRowsDroppedMeter = null;
-    PinotMeter realtimeIncompleteRowsConsumedMeter = null;
-
-    int indexedMessageCount = 0;
+    int indexedMessageCountPerBatch = 0;
     int streamMessageCount = 0;
     boolean canTakeMore = true;
 
-    TransformPipeline.Result reusedResult = new TransformPipeline.Result();
+    _messageProcessor.resetBatchContext();
     boolean prematureExit = false;
     for (int index = 0; index < messageCount; index++) {
       prematureExit = _shouldStop || endCriteriaReached();
@@ -561,67 +557,32 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
         throw new RuntimeException("Realtime segment full");
       }
 
-      // Decode message
-      StreamDataDecoderResult decodedRow = _streamDataDecoder.decode(messagesAndOffsets.getStreamMessage(index));
-      RowMetadata msgMetadata = messagesAndOffsets.getStreamMessage(index).getMetadata();
-      if (decodedRow.getException() != null) {
-        // TODO: based on a config, decide whether the record should be silently dropped or stop further consumption on
-        // decode error
-        realtimeRowsDroppedMeter =
-            _serverMetrics.addMeteredTableValue(_metricKeyName, ServerMeter.INVALID_REALTIME_ROWS_DROPPED, 1,
-                realtimeRowsDroppedMeter);
-        _numRowsErrored++;
+      StreamMessage message = messagesAndOffsets.getStreamMessage(index);
+      RowMetadata msgMetadata = message.getMetadata();
+      MessageProcessorResult result = _messageProcessor.process(message, msgMetadata);
+      if (!result.isSuccess()) {
+        _segmentLogger.error("Message failed to process due to {}", result.getErrorCode());
+        for (SegmentErrorInfo errorInfo: result.getSegmentErrorInfo()) {
+          _realtimeTableDataManager.addSegmentError(_segmentNameStr, errorInfo);
+        }
       } else {
-        try {
-          _transformPipeline.processRow(decodedRow.getResult(), reusedResult);
-        } catch (Exception e) {
-          _numRowsErrored++;
-          // when exception happens we prefer abandoning the whole batch and not partially indexing some rows
-          reusedResult.getTransformedRows().clear();
-          String errorMessage = String.format("Caught exception while transforming the record: %s", decodedRow);
-          _segmentLogger.error(errorMessage, e);
-          _realtimeTableDataManager.addSegmentError(_segmentNameStr, new SegmentErrorInfo(now(), errorMessage, e));
-        }
-        if (reusedResult.getSkippedRowCount() > 0) {
-          realtimeRowsDroppedMeter =
-              _serverMetrics.addMeteredTableValue(_metricKeyName, ServerMeter.REALTIME_ROWS_FILTERED,
-                  reusedResult.getSkippedRowCount(), realtimeRowsDroppedMeter);
-        }
-        if (reusedResult.getIncompleteRowCount() > 0) {
-          realtimeIncompleteRowsConsumedMeter =
-              _serverMetrics.addMeteredTableValue(_metricKeyName, ServerMeter.INCOMPLETE_REALTIME_ROWS_CONSUMED,
-                  reusedResult.getIncompleteRowCount(), realtimeIncompleteRowsConsumedMeter);
-        }
-        for (GenericRow transformedRow : reusedResult.getTransformedRows()) {
-          try {
-            canTakeMore = _realtimeSegment.index(transformedRow, msgMetadata);
-            indexedMessageCount++;
-            _lastRowMetadata = msgMetadata;
-            _lastConsumedTimestampMs = System.currentTimeMillis();
-            realtimeRowsConsumedMeter =
-                _serverMetrics.addMeteredTableValue(_metricKeyName, ServerMeter.REALTIME_ROWS_CONSUMED, 1,
-                    realtimeRowsConsumedMeter);
-          } catch (Exception e) {
-            _numRowsErrored++;
-            String errorMessage = String.format("Caught exception while indexing the record: %s", transformedRow);
-            _segmentLogger.error(errorMessage, e);
-            _realtimeTableDataManager.addSegmentError(_segmentNameStr,
-                new SegmentErrorInfo(now(), errorMessage, e));
-          }
-        }
+        _lastRowMetadata = msgMetadata;
       }
+      _lastConsumedTimestampMs = result.getLastIndexedTimestampMs();
+      indexedMessageCountPerBatch += result.getIndexedMessageCount();
       _currentOffset = messagesAndOffsets.getNextStreamPartitionMsgOffsetAtIndex(index);
       _numRowsIndexed = _realtimeSegment.getNumDocsIndexed();
       _numRowsConsumed++;
       streamMessageCount++;
     }
-    updateIngestionDelay(indexedMessageCount);
+
+    updateIngestionDelay(indexedMessageCountPerBatch);
     updateCurrentDocumentCountMetrics();
     if (messagesAndOffsets.getUnfilteredMessageCount() > 0) {
       _hasMessagesFetched = true;
       if (streamMessageCount > 0 && _segmentLogger.isDebugEnabled()) {
         _segmentLogger.debug("Indexed {} messages ({} messages read from stream) current offset {}",
-            indexedMessageCount, streamMessageCount, _currentOffset);
+            indexedMessageCountPerBatch, streamMessageCount, _currentOffset);
       }
     } else if (!prematureExit) {
       // Record Pinot ingestion delay as zero since we are up-to-date and no new events
@@ -1394,10 +1355,7 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
     // Create message decoder
     Set<String> fieldsToRead = IngestionUtils.getFieldsForRecordExtractor(_tableConfig.getIngestionConfig(), _schema);
     StreamMessageDecoder streamMessageDecoder = StreamDecoderProvider.create(_partitionLevelStreamConfig, fieldsToRead);
-    _streamDataDecoder = new StreamDataDecoderImpl(streamMessageDecoder);
     _clientId = streamTopic + "-" + _partitionGroupId;
-
-    _transformPipeline = new TransformPipeline(tableConfig, schema);
     // Acquire semaphore to create stream consumers
     try {
       _partitionGroupConsumerSemaphore.acquire();
@@ -1415,6 +1373,9 @@ public class LLRealtimeSegmentDataManager extends RealtimeSegmentDataManager {
       createPartitionMetadataProvider("Starting");
       setPartitionParameters(realtimeSegmentConfigBuilder, indexingConfig.getSegmentPartitionConfig());
       _realtimeSegment = new MutableSegmentImpl(realtimeSegmentConfigBuilder.build(), serverMetrics);
+      _messageProcessor = new MessageProcessor(
+          new StreamDataDecoderImpl(streamMessageDecoder), new TransformPipeline(tableConfig, schema),
+          _realtimeSegment, new ProcessingContext(_segmentNameStr, _tableStreamName, _metricKeyName), _serverMetrics);
       _resourceTmpDir = new File(resourceDataDir, "_tmp");
       if (!_resourceTmpDir.exists()) {
         _resourceTmpDir.mkdirs();
