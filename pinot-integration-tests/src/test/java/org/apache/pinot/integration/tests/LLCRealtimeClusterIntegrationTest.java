@@ -259,7 +259,7 @@ public class LLCRealtimeClusterIntegrationTest extends BaseRealtimeClusterIntegr
   @Test
   public void testReload()
       throws Exception {
-    testReload(false);
+    super.testReload(false);
   }
 
   @Test

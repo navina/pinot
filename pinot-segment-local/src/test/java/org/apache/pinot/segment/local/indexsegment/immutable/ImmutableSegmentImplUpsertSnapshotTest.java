@@ -95,9 +95,7 @@ public class ImmutableSegmentImplUpsertSnapshotTest {
     ingestionConfig.setRowTimeValueCheck(false);
     ingestionConfig.setSegmentTimeValueCheck(false);
 
-    UpsertConfig upsertConfig = new UpsertConfig(UpsertConfig.Mode.FULL);
-    upsertConfig.setEnableSnapshot(true);
-
+    UpsertConfig upsertConfig = UpsertConfig.newBuilder().mode(UpsertConfig.Mode.FULL).enableSnapshot(true).build();
     _tableConfig =
         new TableConfigBuilder(TableType.OFFLINE).setTableName("testTable").setTimeColumnName("daysSinceEpoch")
             .setIngestionConfig(ingestionConfig).setUpsertConfig(upsertConfig).build();

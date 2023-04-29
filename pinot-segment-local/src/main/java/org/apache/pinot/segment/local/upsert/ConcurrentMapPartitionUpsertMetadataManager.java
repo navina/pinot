@@ -156,7 +156,7 @@ public class ConcurrentMapPartitionUpsertMetadataManager extends BasePartitionUp
       _serverMetrics.addMeteredTableValue(_tableNameWithType, ServerMeter.UPSERT_KEYS_IN_WRONG_SEGMENT, numKeys);
     }
   }
-
+  
   @Override
   protected void removeSegment(IndexSegment segment, MutableRoaringBitmap validDocIds) {
     assert !validDocIds.isEmpty();

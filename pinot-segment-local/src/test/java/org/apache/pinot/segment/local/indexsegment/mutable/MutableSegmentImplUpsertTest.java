@@ -55,18 +55,16 @@ public class MutableSegmentImplUpsertTest {
   private PartitionUpsertMetadataManager _partitionUpsertMetadataManager;
 
   private UpsertConfig createPartialUpsertConfig(HashFunction hashFunction) {
-    UpsertConfig upsertConfigWithHash = new UpsertConfig(UpsertConfig.Mode.PARTIAL);
-    upsertConfigWithHash.setPartialUpsertStrategies(new HashMap<>());
-    upsertConfigWithHash.setDefaultPartialUpsertStrategy(UpsertConfig.Strategy.OVERWRITE);
-    upsertConfigWithHash.setComparisonColumns(Arrays.asList("secondsSinceEpoch", "otherComparisonColumn"));
-    upsertConfigWithHash.setHashFunction(hashFunction);
-    return upsertConfigWithHash;
+    return UpsertConfig.newBuilder()
+        .mode(UpsertConfig.Mode.PARTIAL)
+        .partialUpsertStrategies(new HashMap<>())
+        .defaultPartialUpsertStrategy(UpsertConfig.Strategy.OVERWRITE)
+        .comparisonColumns(Arrays.asList("secondsSinceEpoch", "otherComparisonColumn"))
+        .hashFunction(hashFunction).build();
   }
 
   private UpsertConfig createFullUpsertConfig(HashFunction hashFunction) {
-    UpsertConfig upsertConfigWithHash = new UpsertConfig(UpsertConfig.Mode.FULL);
-    upsertConfigWithHash.setHashFunction(hashFunction);
-    return upsertConfigWithHash;
+    return UpsertConfig.newBuilder().mode(UpsertConfig.Mode.FULL).hashFunction(hashFunction).build();
   }
 
   private void setup(UpsertConfig upsertConfigWithHash)

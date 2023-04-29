@@ -1535,10 +1535,10 @@ public class TableConfigUtilsTest {
     streamConfigs.put("stream.kafka.consumer.type", "simple");
     Map<String, UpsertConfig.Strategy> partialUpsertStratgies = new HashMap<>();
     partialUpsertStratgies.put("myCol2", UpsertConfig.Strategy.IGNORE);
-    UpsertConfig partialUpsertConfig = new UpsertConfig(UpsertConfig.Mode.PARTIAL);
-    partialUpsertConfig.setPartialUpsertStrategies(partialUpsertStratgies);
-    partialUpsertConfig.setDefaultPartialUpsertStrategy(UpsertConfig.Strategy.OVERWRITE);
-    partialUpsertConfig.setComparisonColumn("myCol2");
+    UpsertConfig partialUpsertConfig = UpsertConfig.newBuilder().mode(UpsertConfig.Mode.PARTIAL)
+        .partialUpsertStrategies(partialUpsertStratgies)
+        .comparisonColumn("myCol2").build();
+        new UpsertConfig(UpsertConfig.Mode.PARTIAL);
     TableConfig tableConfig =
         new TableConfigBuilder(TableType.REALTIME).setTableName(TABLE_NAME).setUpsertConfig(partialUpsertConfig)
             .setNullHandlingEnabled(true)
@@ -1551,9 +1551,8 @@ public class TableConfigUtilsTest {
       Assert.assertEquals(e.getMessage(), "Merger cannot be applied to comparison column");
     }
 
-    partialUpsertConfig = new UpsertConfig(UpsertConfig.Mode.PARTIAL);
-    partialUpsertConfig.setPartialUpsertStrategies(partialUpsertStratgies);
-    partialUpsertConfig.setDefaultPartialUpsertStrategy(UpsertConfig.Strategy.OVERWRITE);
+    partialUpsertConfig = UpsertConfig.newBuilder().mode(UpsertConfig.Mode.PARTIAL)
+        .partialUpsertStrategies(partialUpsertStratgies).build();
     tableConfig = new TableConfigBuilder(TableType.REALTIME).setTableName(TABLE_NAME).setTimeColumnName("myCol2")
         .setUpsertConfig(partialUpsertConfig).setNullHandlingEnabled(true)
         .setRoutingConfig(new RoutingConfig(null, null, RoutingConfig.STRICT_REPLICA_GROUP_INSTANCE_SELECTOR_TYPE))
@@ -1566,6 +1565,8 @@ public class TableConfigUtilsTest {
     }
 
     partialUpsertStratgies.put("myCol1", UpsertConfig.Strategy.INCREMENT);
+    partialUpsertConfig = UpsertConfig.newBuilder().mode(UpsertConfig.Mode.PARTIAL)
+        .partialUpsertStrategies(partialUpsertStratgies).build();
     tableConfig = new TableConfigBuilder(TableType.REALTIME).setTableName(TABLE_NAME).setTimeColumnName("timeCol")
         .setUpsertConfig(partialUpsertConfig).setNullHandlingEnabled(false)
         .setRoutingConfig(new RoutingConfig(null, null, RoutingConfig.STRICT_REPLICA_GROUP_INSTANCE_SELECTOR_TYPE))
