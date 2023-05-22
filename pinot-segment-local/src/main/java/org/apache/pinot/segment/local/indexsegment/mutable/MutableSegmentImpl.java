@@ -371,8 +371,8 @@ public class MutableSegmentImpl implements MutableSegment {
       List<String> upsertComparisonColumns = config.getUpsertComparisonColumns();
       _upsertComparisonColumns =
           upsertComparisonColumns != null ? upsertComparisonColumns : Collections.singletonList(_timeColumnName);
-      String deletedColumn = config.getUpsertDeleteColumn();
-      if (deletedColumn != null) {
+      _upsertDeleteColumn = config.getUpsertDeleteColumn();
+      if (_upsertDeleteColumn != null) {
         _queryDocIds = new ThreadSafeMutableRoaringBitmap();
       } else {
         _queryDocIds = null;
@@ -382,6 +382,7 @@ public class MutableSegmentImpl implements MutableSegment {
       _validDocIds = null;
       _queryDocIds = null;
       _upsertComparisonColumns = null;
+      _upsertDeleteColumn = null;
     }
   }
 
