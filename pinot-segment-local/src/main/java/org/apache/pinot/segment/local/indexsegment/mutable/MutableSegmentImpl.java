@@ -161,6 +161,7 @@ public class MutableSegmentImpl implements MutableSegment {
 
   private final UpsertConfig.Mode _upsertMode;
   private final List<String> _upsertComparisonColumns;
+  private final String _upsertDeleteColumn;
   private final PartitionUpsertMetadataManager _partitionUpsertMetadataManager;
   private final PartitionDedupMetadataManager _partitionDedupMetadataManager;
   // The valid doc ids are maintained locally instead of in the upsert metadata manager because:
@@ -525,20 +526,16 @@ public class MutableSegmentImpl implements MutableSegment {
 
   private RecordInfo getRecordInfo(GenericRow row, int docId) {
     PrimaryKey primaryKey = row.getPrimaryKey(_schema.getPrimaryKeyColumns());
-
-    if (isUpsertEnabled()) {
-      if (_upsertComparisonColumns.size() > 1) {
-        return multiComparisonRecordInfo(primaryKey, docId, row);
-      }
-      Comparable comparisonValue = (Comparable) row.getValue(_upsertComparisonColumns.get(0));
-      return new RecordInfo(primaryKey, docId, comparisonValue);
-    }
-
-    return new RecordInfo(primaryKey, docId, null);
+    Comparable comparisonValue = getComparisonValue(row);
+    boolean recordDeleted = _upsertDeleteColumn != null && (boolean) row.getValue(_upsertDeleteColumn);
+    return new RecordInfo(primaryKey, docId, comparisonValue, recordDeleted);
   }
 
-  private RecordInfo multiComparisonRecordInfo(PrimaryKey primaryKey, int docId, GenericRow row) {
+  private Comparable<ComparisonColumns> getComparisonValue(GenericRow row) {
     int numComparisonColumns = _upsertComparisonColumns.size();
+    if (numComparisonColumns == 1) {
+      return (Comparable<ComparisonColumns>) row.getValue(_upsertComparisonColumns.get(0));
+    }
     Comparable[] comparisonValues = new Comparable[numComparisonColumns];
 
     int comparableIndex = -1;
@@ -563,7 +560,7 @@ public class MutableSegmentImpl implements MutableSegment {
     }
     Preconditions.checkState(comparableIndex != -1,
         "Documents must have exactly 1 non-null comparison column value");
-    return new RecordInfo(primaryKey, docId, new ComparisonColumns(comparisonValues, comparableIndex));
+    return new ComparisonColumns(comparisonValues, comparableIndex);
   }
 
   private void updateDictionary(GenericRow row) {
