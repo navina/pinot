@@ -26,11 +26,17 @@ public class RecordInfo {
   private final PrimaryKey _primaryKey;
   private final int _docId;
   private final Comparable _comparisonValue;
+  private final boolean _deleteMarker;
 
   public RecordInfo(PrimaryKey primaryKey, int docId, Comparable comparisonValue) {
+    this(primaryKey, docId, comparisonValue, false);
+  }
+
+  public RecordInfo(PrimaryKey primaryKey, int docId, Comparable comparisonValue, boolean deleteMarker) {
     _primaryKey = primaryKey;
     _docId = docId;
     _comparisonValue = comparisonValue;
+    _deleteMarker = deleteMarker;
   }
 
   public PrimaryKey getPrimaryKey() {

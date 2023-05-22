@@ -173,6 +173,8 @@ public class MutableSegmentImpl implements MutableSegment {
   //        the valid doc ids won't be updated.
   private final ThreadSafeMutableRoaringBitmap _validDocIds;
 
+  @Nullable private final ThreadSafeMutableRoaringBitmap _queryDocIds;  // Excludes deleted docIds
+
   public MutableSegmentImpl(RealtimeSegmentConfig config, @Nullable ServerMetrics serverMetrics) {
     _serverMetrics = serverMetrics;
     _realtimeTableName = config.getTableNameWithType();
@@ -368,9 +370,16 @@ public class MutableSegmentImpl implements MutableSegment {
       List<String> upsertComparisonColumns = config.getUpsertComparisonColumns();
       _upsertComparisonColumns =
           upsertComparisonColumns != null ? upsertComparisonColumns : Collections.singletonList(_timeColumnName);
+      String deletedColumn = config.getUpsertDeleteColumn();
+      if (deletedColumn != null) {
+        _queryDocIds = new ThreadSafeMutableRoaringBitmap();
+      } else {
+        _queryDocIds = null;
+      }
     } else {
       _partitionUpsertMetadataManager = null;
       _validDocIds = null;
+      _queryDocIds = null;
       _upsertComparisonColumns = null;
     }
   }
@@ -459,21 +468,16 @@ public class MutableSegmentImpl implements MutableSegment {
     boolean canTakeMore;
     int numDocsIndexed = _numDocsIndexed;
 
-    RecordInfo recordInfo = null;
-
-    if (isDedupEnabled() || isUpsertEnabled()) {
-      recordInfo = getRecordInfo(row, numDocsIndexed);
-    }
-
-    if (isDedupEnabled() && _partitionDedupMetadataManager.checkRecordPresentOrUpdate(recordInfo.getPrimaryKey(),
-        this)) {
-      if (_serverMetrics != null) {
+    if (isDedupEnabled()) {
+      PrimaryKey primaryKey =  row.getPrimaryKey(_schema.getPrimaryKeyColumns());
+      if (_partitionDedupMetadataManager.checkRecordPresentOrUpdate(primaryKey, this)) {
         _serverMetrics.addMeteredTableValue(_realtimeTableName, ServerMeter.REALTIME_DEDUP_DROPPED, 1);
       }
       return true;
     }
 
     if (isUpsertEnabled()) {
+      RecordInfo recordInfo = getRecordInfo(row, numDocsIndexed);
       GenericRow updatedRow = _partitionUpsertMetadataManager.updateRecord(row, recordInfo);
       updateDictionary(updatedRow);
       addNewRow(numDocsIndexed, updatedRow);
