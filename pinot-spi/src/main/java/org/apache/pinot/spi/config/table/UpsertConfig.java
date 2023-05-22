@@ -54,6 +54,9 @@ public class UpsertConfig extends BaseJsonConfig {
   @JsonPropertyDescription("Columns for upsert comparison, default to time column")
   private List<String> _comparisonColumns;
 
+  @JsonPropertyDescription("Columns for deleting a record in upsert table, default null indicates deletes are disabled")
+  private String _deleteColumn;
+
   @JsonPropertyDescription("Whether to use snapshot for fast upsert metadata recovery")
   private boolean _enableSnapshot;
 
@@ -154,6 +157,14 @@ public class UpsertConfig extends BaseJsonConfig {
     }
   }
 
+  public void setDeleteColumn(String deleteColumn) {
+    _deleteColumn = deleteColumn;
+  }
+
+  @Nullable
+  public String getDeleteColumn() {
+    return _deleteColumn;
+  }
   public void setEnableSnapshot(boolean enableSnapshot) {
     _enableSnapshot = enableSnapshot;
   }

@@ -26,11 +26,17 @@ public class RecordInfo {
   private final PrimaryKey _primaryKey;
   private final int _docId;
   private final Comparable _comparisonValue;
+  private final boolean _recordDeleted;
 
   public RecordInfo(PrimaryKey primaryKey, int docId, Comparable comparisonValue) {
+    this(primaryKey, docId, comparisonValue, false);
+  }
+
+  public RecordInfo(PrimaryKey primaryKey, int docId, Comparable comparisonValue, boolean recordDeleted) {
     _primaryKey = primaryKey;
     _docId = docId;
     _comparisonValue = comparisonValue;
+    _recordDeleted = recordDeleted;
   }
 
   public PrimaryKey getPrimaryKey() {
@@ -43,5 +49,9 @@ public class RecordInfo {
 
   public Comparable getComparisonValue() {
     return _comparisonValue;
+  }
+
+  public boolean isRecordDeleted() {
+    return _recordDeleted;
   }
 }

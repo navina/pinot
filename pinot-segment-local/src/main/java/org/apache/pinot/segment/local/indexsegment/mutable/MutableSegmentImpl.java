@@ -161,6 +161,7 @@ public class MutableSegmentImpl implements MutableSegment {
 
   private final UpsertConfig.Mode _upsertMode;
   private final List<String> _upsertComparisonColumns;
+  private final String _upsertDeleteColumn;
   private final PartitionUpsertMetadataManager _partitionUpsertMetadataManager;
   private final PartitionDedupMetadataManager _partitionDedupMetadataManager;
   // The valid doc ids are maintained locally instead of in the upsert metadata manager because:
@@ -172,6 +173,8 @@ public class MutableSegmentImpl implements MutableSegment {
   //        consumption with newer timestamp (late event in consuming segment), the record location will be updated, but
   //        the valid doc ids won't be updated.
   private final ThreadSafeMutableRoaringBitmap _validDocIds;
+
+  @Nullable private final ThreadSafeMutableRoaringBitmap _queryDocIds;  // Excludes deleted docIds
 
   public MutableSegmentImpl(RealtimeSegmentConfig config, @Nullable ServerMetrics serverMetrics) {
     _serverMetrics = serverMetrics;
@@ -368,10 +371,18 @@ public class MutableSegmentImpl implements MutableSegment {
       List<String> upsertComparisonColumns = config.getUpsertComparisonColumns();
       _upsertComparisonColumns =
           upsertComparisonColumns != null ? upsertComparisonColumns : Collections.singletonList(_timeColumnName);
+      _upsertDeleteColumn = config.getUpsertDeleteColumn();
+      if (_upsertDeleteColumn != null) {
+        _queryDocIds = new ThreadSafeMutableRoaringBitmap();
+      } else {
+        _queryDocIds = null;
+      }
     } else {
       _partitionUpsertMetadataManager = null;
       _validDocIds = null;
+      _queryDocIds = null;
       _upsertComparisonColumns = null;
+      _upsertDeleteColumn = null;
     }
   }
 
@@ -459,21 +470,16 @@ public class MutableSegmentImpl implements MutableSegment {
     boolean canTakeMore;
     int numDocsIndexed = _numDocsIndexed;
 
-    RecordInfo recordInfo = null;
-
-    if (isDedupEnabled() || isUpsertEnabled()) {
-      recordInfo = getRecordInfo(row, numDocsIndexed);
-    }
-
-    if (isDedupEnabled() && _partitionDedupMetadataManager.checkRecordPresentOrUpdate(recordInfo.getPrimaryKey(),
-        this)) {
-      if (_serverMetrics != null) {
+    if (isDedupEnabled()) {
+      PrimaryKey primaryKey =  row.getPrimaryKey(_schema.getPrimaryKeyColumns());
+      if (_partitionDedupMetadataManager.checkRecordPresentOrUpdate(primaryKey, this)) {
         _serverMetrics.addMeteredTableValue(_realtimeTableName, ServerMeter.REALTIME_DEDUP_DROPPED, 1);
       }
       return true;
     }
 
     if (isUpsertEnabled()) {
+      RecordInfo recordInfo = getRecordInfo(row, numDocsIndexed);
       GenericRow updatedRow = _partitionUpsertMetadataManager.updateRecord(row, recordInfo);
       updateDictionary(updatedRow);
       addNewRow(numDocsIndexed, updatedRow);
@@ -521,20 +527,16 @@ public class MutableSegmentImpl implements MutableSegment {
 
   private RecordInfo getRecordInfo(GenericRow row, int docId) {
     PrimaryKey primaryKey = row.getPrimaryKey(_schema.getPrimaryKeyColumns());
-
-    if (isUpsertEnabled()) {
-      if (_upsertComparisonColumns.size() > 1) {
-        return multiComparisonRecordInfo(primaryKey, docId, row);
-      }
-      Comparable comparisonValue = (Comparable) row.getValue(_upsertComparisonColumns.get(0));
-      return new RecordInfo(primaryKey, docId, comparisonValue);
-    }
-
-    return new RecordInfo(primaryKey, docId, null);
+    Comparable comparisonValue = getComparisonValue(row);
+    boolean recordDeleted = _upsertDeleteColumn != null && (boolean) row.getValue(_upsertDeleteColumn);
+    return new RecordInfo(primaryKey, docId, comparisonValue, recordDeleted);
   }
 
-  private RecordInfo multiComparisonRecordInfo(PrimaryKey primaryKey, int docId, GenericRow row) {
+  private Comparable<ComparisonColumns> getComparisonValue(GenericRow row) {
     int numComparisonColumns = _upsertComparisonColumns.size();
+    if (numComparisonColumns == 1) {
+      return (Comparable<ComparisonColumns>) row.getValue(_upsertComparisonColumns.get(0));
+    }
     Comparable[] comparisonValues = new Comparable[numComparisonColumns];
 
     int comparableIndex = -1;
@@ -559,7 +561,7 @@ public class MutableSegmentImpl implements MutableSegment {
     }
     Preconditions.checkState(comparableIndex != -1,
         "Documents must have exactly 1 non-null comparison column value");
-    return new RecordInfo(primaryKey, docId, new ComparisonColumns(comparisonValues, comparableIndex));
+    return new ComparisonColumns(comparisonValues, comparableIndex);
   }
 
   private void updateDictionary(GenericRow row) {
