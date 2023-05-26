@@ -22,7 +22,6 @@ import java.io.File;
 import java.net.URI;
 import java.util.List;
 import java.util.Random;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.pinot.common.auth.AuthProviderUtils;
 import org.apache.pinot.spi.auth.AuthProvider;
 import org.apache.pinot.spi.env.PinotConfiguration;
@@ -103,8 +102,7 @@ public abstract class BaseSegmentFetcher implements SegmentFetcher {
     });
   }
 
-  public File fetchUntarSegmentToLocalStreamed(URI uri, File dest, long rateLimit,
-      AtomicInteger attempts)
+  public File fetchUntarSegmentToLocalStreamed(URI uri, File dest, long rateLimit)
       throws Exception {
     throw new UnsupportedOperationException();
   }
