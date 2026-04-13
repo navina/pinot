@@ -438,10 +438,8 @@ public abstract class BaseBrokerStarter implements ServiceStartable {
         }
         brokerContext.setServerHttpsContext(sslContext);
       }
-      singleStageBrokerRequestHandler =
-          new SingleConnectionBrokerRequestHandler(_brokerConf, brokerId, requestIdGenerator, _routingManager,
-              _accessControlFactory, _queryQuotaManager, _tableCache, nettyDefaults, tlsDefaults,
-              _serverRoutingStatsManager, _failureDetector, _threadAccountant, multiClusterRoutingContext);
+      singleStageBrokerRequestHandler = createNettyBrokerRequestHandler(
+          brokerId, requestIdGenerator, nettyDefaults, tlsDefaults, multiClusterRoutingContext);
     }
     MultiStageBrokerRequestHandler multiStageBrokerRequestHandler = null;
     if (_brokerConf.getProperty(Helix.CONFIG_OF_MULTI_STAGE_ENGINE_ENABLED, Helix.DEFAULT_MULTI_STAGE_ENGINE_ENABLED)) {
@@ -559,6 +557,18 @@ public abstract class BaseBrokerStarter implements ServiceStartable {
     NettyInspector.registerMetrics(_brokerMetrics);
 
     LOGGER.info("Finish starting Pinot broker");
+  }
+
+  /**
+   * Creates the single-stage broker request handler for the default Netty transport.
+   * Subclasses may override to provide a custom implementation.
+   */
+  protected BaseSingleStageBrokerRequestHandler createNettyBrokerRequestHandler(String brokerId,
+      BrokerRequestIdGenerator requestIdGenerator, NettyConfig nettyConfig, TlsConfig tlsConfig,
+      MultiClusterRoutingContext multiClusterRoutingContext) {
+    return new SingleConnectionBrokerRequestHandler(_brokerConf, brokerId, requestIdGenerator, _routingManager,
+        _accessControlFactory, _queryQuotaManager, _tableCache, nettyConfig, tlsConfig,
+        _serverRoutingStatsManager, _failureDetector, _threadAccountant, multiClusterRoutingContext);
   }
 
   protected void initClusterChangeMediator() throws Exception {

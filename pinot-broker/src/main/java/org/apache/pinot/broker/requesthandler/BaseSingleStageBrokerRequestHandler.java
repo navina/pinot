@@ -28,6 +28,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletionService;
@@ -832,29 +833,39 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
       }
     }
     BrokerResponseNative brokerResponse;
-    if (isQueryCancellationEnabled()) {
-      // Start to track the running query for cancellation just before sending it out to servers to avoid any
-      // potential failures that could happen before sending it out, like failures to calculate the routing table etc.
-      // TODO: Even tracking the query as late as here, a potential race condition between calling cancel API and
-      //       query being sent out to servers can still happen. If cancel request arrives earlier than query being
-      //       sent out to servers, the servers miss the cancel request and continue to run the queries. The users
-      //       can always list the running queries and cancel query again until it ends. Just that such race
-      //       condition makes cancel API less reliable. This should be rare as it assumes sending queries out to
-      //       servers takes time, but will address later if needed.
-      String clientRequestId = extractClientRequestId(sqlNodeAndOptions);
-      onQueryStart(requestId, clientRequestId, query,
-          new QueryServers(query, offlineExecutionServers, realtimeExecutionServers));
-      try {
-        brokerResponse = processBrokerRequest(requestId, brokerRequest, serverBrokerRequest, routeInfo,
-            remainingTimeMs, serverStats, requestContext);
-        brokerResponse.setClientRequestId(clientRequestId);
-      } finally {
-        onQueryFinish(requestId);
-        LOGGER.debug("Remove track of running query: {}", requestId);
-      }
+    Optional<BrokerResponseNative> cachedResponse =
+        lookupQueryCache(brokerRequest, serverBrokerRequest, schema, routeInfo, remainingTimeMs, requestContext);
+    if (cachedResponse.isPresent()) {
+      brokerResponse = cachedResponse.get();
     } else {
-      brokerResponse = processBrokerRequest(requestId, brokerRequest, serverBrokerRequest, routeInfo,
-          remainingTimeMs, serverStats, requestContext);
+      BrokerResponseNative liveResponse;
+      if (isQueryCancellationEnabled()) {
+        // Start to track the running query for cancellation just before sending it out to servers to avoid any
+        // potential failures that could happen before sending it out, like failures to calculate the routing table etc.
+        // TODO: Even tracking the query as late as here, a potential race condition between calling cancel API and
+        //       query being sent out to servers can still happen. If cancel request arrives earlier than query being
+        //       sent out to servers, the servers miss the cancel request and continue to run the queries. The users
+        //       can always list the running queries and cancel query again until it ends. Just that such race
+        //       condition makes cancel API less reliable. This should be rare as it assumes sending queries out to
+        //       servers takes time, but will address later if needed.
+        String clientRequestId = extractClientRequestId(sqlNodeAndOptions);
+        onQueryStart(requestId, clientRequestId, query,
+            new QueryServers(query, offlineExecutionServers, realtimeExecutionServers));
+        try {
+          liveResponse = processBrokerRequest(requestId, brokerRequest, serverBrokerRequest, routeInfo,
+              remainingTimeMs, serverStats, requestContext);
+          liveResponse.setClientRequestId(clientRequestId);
+        } finally {
+          onQueryFinish(requestId);
+          LOGGER.debug("Remove track of running query: {}", requestId);
+        }
+      } else {
+        liveResponse = processBrokerRequest(requestId, brokerRequest, serverBrokerRequest, routeInfo,
+            remainingTimeMs, serverStats, requestContext);
+      }
+      brokerResponse =
+          onBrokerResponse(brokerRequest, serverBrokerRequest, schema, routeInfo, liveResponse, requestContext)
+              .orElse(liveResponse);
     }
     brokerResponse.setTablesQueried(Set.of(rawTableName));
     brokerResponse.setPools(Stream.concat(
@@ -2144,6 +2155,30 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
       BrokerRequest serverBrokerRequest, TableRouteInfo route, long timeoutMs,
       ServerStats serverStats, RequestContext requestContext)
       throws Exception;
+
+  /**
+   * Called after routing and compilation, before scatter-gather.
+   * Implementations may return a cached response to short-circuit scatter-gather entirely.
+   * The {@code serverBrokerRequest} may be mutated in place to narrow the query to uncached ranges.
+   * Default: returns empty (scatter-gather proceeds normally).
+   */
+  protected Optional<BrokerResponseNative> lookupQueryCache(BrokerRequest originalBrokerRequest,
+      BrokerRequest serverBrokerRequest, @Nullable Schema schema, TableRouteInfo route,
+      long remainingTimeMs, RequestContext requestContext) {
+    return Optional.empty();
+  }
+
+  /**
+   * Called after scatter-gather completes with the live response.
+   * Implementations may return a merged response (e.g., cached + live buckets).
+   * Not called when {@link #lookupQueryCache} returned a hit.
+   * Default: returns empty (live response used as-is).
+   */
+  protected Optional<BrokerResponseNative> onBrokerResponse(BrokerRequest originalBrokerRequest,
+      BrokerRequest serverBrokerRequest, @Nullable Schema schema, TableRouteInfo route,
+      BrokerResponseNative liveResponse, RequestContext requestContext) {
+    return Optional.empty();
+  }
 
   private String getGlobalQueryId(long requestId) {
     return _brokerId + "_" + requestId;
