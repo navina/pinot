@@ -210,7 +210,7 @@ public class BaseSingleStageBrokerRequestHandlerTest {
           @Override
           protected BrokerResponseNative processBrokerRequest(long requestId, BrokerRequest originalBrokerRequest,
               BrokerRequest serverBrokerRequest, TableRouteInfo route, long timeoutMs, ServerStats serverStats,
-              RequestContext requestContext)
+              RequestContext requestContext, PreResult preResult)
               throws Exception {
             testRequestId[0] = requestId;
             latch.await();
@@ -340,7 +340,7 @@ public class BaseSingleStageBrokerRequestHandlerTest {
       @Override
       protected BrokerResponseNative processBrokerRequest(long requestId, BrokerRequest originalBrokerRequest,
           BrokerRequest serverBrokerRequest, TableRouteInfo route, long timeoutMs, ServerStats serverStats,
-          RequestContext requestContext) {
+          RequestContext requestContext, PreResult preResult) {
         capturedRouteInfo.set(route);
         return BrokerResponseNative.empty();
       }

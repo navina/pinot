@@ -242,6 +242,17 @@ public interface TableRouteInfo {
    */
   Map<ServerRoutingInstance, InstanceRequest> getRequestMap(long requestId, String brokerId, boolean preferTls);
 
+  /**
+   * Returns a shallow copy of this route with the offline broker request replaced by
+   * {@code newOfflineBrokerRequest}. All other fields (routing tables, realtime request, configs,
+   * time boundary, etc.) are shared with the original. Used by plugins to narrow the offline
+   * time-range filter for partial cache hits without mutating the original route.
+   *
+   * @param newOfflineBrokerRequest the replacement offline broker request
+   * @return a new {@link TableRouteInfo} with only the offline broker request replaced
+   */
+  TableRouteInfo withOfflineBrokerRequest(BrokerRequest newOfflineBrokerRequest);
+
   static InstanceRequest createInstanceRequest(BrokerRequest brokerRequest, String brokerId, long requestId) {
     InstanceRequest instanceRequest = new InstanceRequest();
     instanceRequest.setBrokerId(brokerId);

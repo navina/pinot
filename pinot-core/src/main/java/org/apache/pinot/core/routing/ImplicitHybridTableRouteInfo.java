@@ -270,6 +270,27 @@ public class ImplicitHybridTableRouteInfo implements TableRouteInfo {
     _numPrunedSegmentsTotal = numPrunedSegmentsTotal;
   }
 
+  @Override
+  public TableRouteInfo withOfflineBrokerRequest(BrokerRequest newOfflineBrokerRequest) {
+    ImplicitHybridTableRouteInfo copy = new ImplicitHybridTableRouteInfo();
+    copy._offlineTableName = _offlineTableName;
+    copy._isOfflineRouteExists = _isOfflineRouteExists;
+    copy._offlineTableConfig = _offlineTableConfig;
+    copy._isOfflineTableDisabled = _isOfflineTableDisabled;
+    copy._realtimeTableName = _realtimeTableName;
+    copy._isRealtimeRouteExists = _isRealtimeRouteExists;
+    copy._realtimeTableConfig = _realtimeTableConfig;
+    copy._isRealtimeTableDisabled = _isRealtimeTableDisabled;
+    copy._timeBoundaryInfo = _timeBoundaryInfo;
+    copy._unavailableSegments = _unavailableSegments;
+    copy._numPrunedSegmentsTotal = _numPrunedSegmentsTotal;
+    copy._offlineBrokerRequest = newOfflineBrokerRequest;
+    copy._realtimeBrokerRequest = _realtimeBrokerRequest;
+    copy._offlineRoutingTable = _offlineRoutingTable;
+    copy._realtimeRoutingTable = _realtimeRoutingTable;
+    return copy;
+  }
+
   private Map<ServerRoutingInstance, InstanceRequest> getRequestMapFromRoutingTable(TableType tableType,
       Map<ServerInstance, SegmentsToQuery> routingTable, BrokerRequest brokerRequest, long requestId, String brokerId,
       boolean preferTls) {

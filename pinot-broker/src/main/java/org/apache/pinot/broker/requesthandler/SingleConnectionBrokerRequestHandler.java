@@ -99,7 +99,7 @@ public class SingleConnectionBrokerRequestHandler extends BaseSingleStageBrokerR
   @Override
   protected BrokerResponseNative processBrokerRequest(long requestId, BrokerRequest originalBrokerRequest,
       BrokerRequest serverBrokerRequest, TableRouteInfo route, long timeoutMs,
-      ServerStats serverStats, RequestContext requestContext)
+      ServerStats serverStats, RequestContext requestContext, PreResult preResult)
       throws Exception {
     BrokerRequest offlineBrokerRequest = route.getOfflineBrokerRequest();
     BrokerRequest realtimeBrokerRequest = route.getRealtimeBrokerRequest();
@@ -144,10 +144,13 @@ public class SingleConnectionBrokerRequestHandler extends BaseSingleStageBrokerR
     }
     int numServersResponded = dataTableMap.size();
 
+    Map<ServerRoutingInstance, DataTable> dataTableMapToReduce =
+        _brokerQueryPlugin.postScatterGather(preResult, dataTableMap);
+
     long reduceStartTimeNs = System.nanoTime();
     long reduceTimeoutMs = timeoutMs - TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - scatterGatherStartTimeNs);
     BrokerResponseNative brokerResponse =
-        _brokerReduceService.reduceOnDataTable(originalBrokerRequest, serverBrokerRequest, dataTableMap,
+        _brokerReduceService.reduceOnDataTable(originalBrokerRequest, serverBrokerRequest, dataTableMapToReduce,
             reduceTimeoutMs, _brokerMetrics);
     long reduceTimeNanos = System.nanoTime() - reduceStartTimeNs;
     _brokerMetrics.addPhaseTiming(rawTableName, BrokerQueryPhase.REDUCE, reduceTimeNanos);

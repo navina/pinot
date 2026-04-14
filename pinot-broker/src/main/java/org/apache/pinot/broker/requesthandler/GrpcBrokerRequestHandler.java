@@ -92,7 +92,7 @@ public class GrpcBrokerRequestHandler extends BaseSingleStageBrokerRequestHandle
   @Override
   protected BrokerResponseNative processBrokerRequest(long requestId, BrokerRequest originalBrokerRequest,
       BrokerRequest serverBrokerRequest, TableRouteInfo route, long timeoutMs,
-      ServerStats serverStats, RequestContext requestContext)
+      ServerStats serverStats, RequestContext requestContext, PreResult preResult)
       throws Exception {
     BrokerRequest offlineBrokerRequest = route.getOfflineBrokerRequest();
     BrokerRequest realtimeBrokerRequest = route.getRealtimeBrokerRequest();

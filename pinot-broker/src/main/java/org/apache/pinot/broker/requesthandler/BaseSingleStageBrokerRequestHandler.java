@@ -28,7 +28,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletionService;
@@ -182,6 +181,7 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
   protected BlockingQueue<Pair<String, String>> _multistageCompileQueryQueue;
   protected ImplicitHybridTableRouteProvider _implicitHybridTableRouteProvider;
   protected LogicalTableRouteProvider _logicalTableRouteProvider;
+  protected final BrokerQueryPlugin _brokerQueryPlugin;
 
   public BaseSingleStageBrokerRequestHandler(PinotConfiguration config, String brokerId,
       BrokerRequestIdGenerator requestIdGenerator, RoutingManager routingManager,
@@ -220,6 +220,7 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
 
     _implicitHybridTableRouteProvider = new ImplicitHybridTableRouteProvider();
     _logicalTableRouteProvider = new LogicalTableRouteProvider(multiClusterRoutingContext);
+    _brokerQueryPlugin = BrokerQueryPluginFactory.create(_config);
 
     LOGGER.info("Initialized {} with broker id: {}, timeout: {}ms, query response limit: {}, "
             + "default query limit {}, query log max length: {}, query log max rate: {}, query cancellation "
@@ -230,6 +231,7 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
 
   @Override
   public void start() {
+    _brokerQueryPlugin.init(_config);
     if (_enableMultistageMigrationMetric) {
       _multistageCompileExecutor.submit(() -> {
         while (!Thread.currentThread().isInterrupted()) {
@@ -256,6 +258,7 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
 
   @Override
   public void shutDown() {
+    _brokerQueryPlugin.close();
     if (_enableMultistageMigrationMetric) {
       _multistageCompileExecutor.shutdownNow();
     }
@@ -832,41 +835,39 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
         realtimeExecutionServers = null;
       }
     }
-    BrokerResponseNative brokerResponse;
-    Optional<BrokerResponseNative> cachedResponse =
-        lookupQueryCache(brokerRequest, serverBrokerRequest, schema, routeInfo, remainingTimeMs, requestContext);
-    if (cachedResponse.isPresent()) {
-      brokerResponse = cachedResponse.get();
-    } else {
-      BrokerResponseNative liveResponse;
-      if (isQueryCancellationEnabled()) {
-        // Start to track the running query for cancellation just before sending it out to servers to avoid any
-        // potential failures that could happen before sending it out, like failures to calculate the routing table etc.
-        // TODO: Even tracking the query as late as here, a potential race condition between calling cancel API and
-        //       query being sent out to servers can still happen. If cancel request arrives earlier than query being
-        //       sent out to servers, the servers miss the cancel request and continue to run the queries. The users
-        //       can always list the running queries and cancel query again until it ends. Just that such race
-        //       condition makes cancel API less reliable. This should be rare as it assumes sending queries out to
-        //       servers takes time, but will address later if needed.
-        String clientRequestId = extractClientRequestId(sqlNodeAndOptions);
-        onQueryStart(requestId, clientRequestId, query,
-            new QueryServers(query, offlineExecutionServers, realtimeExecutionServers));
-        try {
-          liveResponse = processBrokerRequest(requestId, brokerRequest, serverBrokerRequest, routeInfo,
-              remainingTimeMs, serverStats, requestContext);
-          liveResponse.setClientRequestId(clientRequestId);
-        } finally {
-          onQueryFinish(requestId);
-          LOGGER.debug("Remove track of running query: {}", requestId);
-        }
-      } else {
-        liveResponse = processBrokerRequest(requestId, brokerRequest, serverBrokerRequest, routeInfo,
-            remainingTimeMs, serverStats, requestContext);
+    ScatterGatherQueryContext queryContext =
+        new ScatterGatherQueryContextImpl(serverBrokerRequest, schema, routeInfo, requestContext);
+    PreResult preResult = _brokerQueryPlugin.preScatterGather(queryContext);
+    ScatterGatherQueryContext effectiveContext = preResult.newContext();
+
+    BrokerResponseNative liveResponse;
+    if (isQueryCancellationEnabled()) {
+      // Start to track the running query for cancellation just before sending it out to servers to avoid any
+      // potential failures that could happen before sending it out, like failures to calculate the routing table etc.
+      // TODO: Even tracking the query as late as here, a potential race condition between calling cancel API and
+      //       query being sent out to servers can still happen. If cancel request arrives earlier than query being
+      //       sent out to servers, the servers miss the cancel request and continue to run the queries. The users
+      //       can always list the running queries and cancel query again until it ends. Just that such race
+      //       condition makes cancel API less reliable. This should be rare as it assumes sending queries out to
+      //       servers takes time, but will address later if needed.
+      String clientRequestId = extractClientRequestId(sqlNodeAndOptions);
+      onQueryStart(requestId, clientRequestId, query,
+          new QueryServers(query, offlineExecutionServers, realtimeExecutionServers));
+      try {
+        liveResponse = processBrokerRequest(requestId, brokerRequest,
+            effectiveContext.serverBrokerRequest(), effectiveContext.route(),
+            remainingTimeMs, serverStats, requestContext, preResult);
+        liveResponse.setClientRequestId(clientRequestId);
+      } finally {
+        onQueryFinish(requestId);
+        LOGGER.debug("Remove track of running query: {}", requestId);
       }
-      brokerResponse =
-          onBrokerResponse(brokerRequest, serverBrokerRequest, schema, routeInfo, liveResponse, requestContext)
-              .orElse(liveResponse);
+    } else {
+      liveResponse = processBrokerRequest(requestId, brokerRequest,
+          effectiveContext.serverBrokerRequest(), effectiveContext.route(),
+          remainingTimeMs, serverStats, requestContext, preResult);
     }
+    BrokerResponseNative brokerResponse = liveResponse;
     brokerResponse.setTablesQueried(Set.of(rawTableName));
     brokerResponse.setPools(Stream.concat(
             offlineExecutionServers != null ? offlineExecutionServers.stream() : Stream.empty(),
@@ -2153,32 +2154,8 @@ public abstract class BaseSingleStageBrokerRequestHandler extends BaseBrokerRequ
    */
   protected abstract BrokerResponseNative processBrokerRequest(long requestId, BrokerRequest originalBrokerRequest,
       BrokerRequest serverBrokerRequest, TableRouteInfo route, long timeoutMs,
-      ServerStats serverStats, RequestContext requestContext)
+      ServerStats serverStats, RequestContext requestContext, PreResult preResult)
       throws Exception;
-
-  /**
-   * Called after routing and compilation, before scatter-gather.
-   * Implementations may return a cached response to short-circuit scatter-gather entirely.
-   * The {@code serverBrokerRequest} may be mutated in place to narrow the query to uncached ranges.
-   * Default: returns empty (scatter-gather proceeds normally).
-   */
-  protected Optional<BrokerResponseNative> lookupQueryCache(BrokerRequest originalBrokerRequest,
-      BrokerRequest serverBrokerRequest, @Nullable Schema schema, TableRouteInfo route,
-      long remainingTimeMs, RequestContext requestContext) {
-    return Optional.empty();
-  }
-
-  /**
-   * Called after scatter-gather completes with the live response.
-   * Implementations may return a merged response (e.g., cached + live buckets).
-   * Not called when {@link #lookupQueryCache} returned a hit.
-   * Default: returns empty (live response used as-is).
-   */
-  protected Optional<BrokerResponseNative> onBrokerResponse(BrokerRequest originalBrokerRequest,
-      BrokerRequest serverBrokerRequest, @Nullable Schema schema, TableRouteInfo route,
-      BrokerResponseNative liveResponse, RequestContext requestContext) {
-    return Optional.empty();
-  }
 
   private String getGlobalQueryId(long requestId) {
     return _brokerId + "_" + requestId;

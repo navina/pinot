@@ -387,4 +387,22 @@ public class LogicalTableRouteInfo implements TableRouteInfo {
   public void setTimeBoundaryStrategy(TimeBoundaryStrategy timeBoundaryStrategy) {
     _timeBoundaryStrategy = timeBoundaryStrategy;
   }
+
+  @Override
+  public TableRouteInfo withOfflineBrokerRequest(BrokerRequest newOfflineBrokerRequest) {
+    LogicalTableRouteInfo copy = new LogicalTableRouteInfo();
+    copy._logicalTableName = _logicalTableName;
+    copy._offlineTables = _offlineTables;
+    copy._realtimeTables = _realtimeTables;
+    copy._offlineTableConfig = _offlineTableConfig;
+    copy._realtimeTableConfig = _realtimeTableConfig;
+    copy._queryConfig = _queryConfig;
+    copy._unavailableSegments = _unavailableSegments;
+    copy._numPrunedSegments = _numPrunedSegments;
+    copy._offlineBrokerRequest = newOfflineBrokerRequest;
+    copy._realtimeBrokerRequest = _realtimeBrokerRequest;
+    copy._timeBoundaryStrategy = _timeBoundaryStrategy;
+    copy._timeBoundaryInfo = _timeBoundaryInfo;
+    return copy;
+  }
 }
