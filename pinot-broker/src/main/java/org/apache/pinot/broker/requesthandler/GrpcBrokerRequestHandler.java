@@ -18,7 +18,9 @@
  */
 package org.apache.pinot.broker.requesthandler;
 
+import com.google.protobuf.ByteString;
 import io.grpc.ConnectivityState;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -30,6 +32,7 @@ import org.apache.pinot.broker.broker.AccessControlFactory;
 import org.apache.pinot.broker.queryquota.QueryQuotaManager;
 import org.apache.pinot.common.config.GrpcConfig;
 import org.apache.pinot.common.config.provider.TableCache;
+import org.apache.pinot.common.datatable.DataTable;
 import org.apache.pinot.common.failuredetector.FailureDetector;
 import org.apache.pinot.common.proto.Server;
 import org.apache.pinot.common.request.BrokerRequest;
@@ -114,11 +117,34 @@ public class GrpcBrokerRequestHandler extends BaseSingleStageBrokerRequestHandle
       sendRequest(requestId, TableType.REALTIME, realtimeBrokerRequest, realtimeRoutingTable, responseMap,
           requestContext.isSampledRequest());
     }
+    // Inject any cached DataTables returned by the plugin as synthetic streaming entries.
+    // Live responses are not passed to the plugin — cache population is handled by an async
+    // background warmer that queries servers directly, independent of live query traffic.
+    Map<ServerRoutingInstance, DataTable> cachedEntries =
+        _brokerQueryPlugin.postScatterGather(preResult, Collections.emptyMap());
+    for (Map.Entry<ServerRoutingInstance, DataTable> entry : cachedEntries.entrySet()) {
+      if (!responseMap.containsKey(entry.getKey())) {
+        responseMap.put(entry.getKey(), toSingletonIterator(entry.getValue()));
+      }
+    }
+
     long reduceStartTimeNs = System.nanoTime();
     BrokerResponseNative brokerResponse =
         _streamingReduceService.reduceOnStreamResponse(originalBrokerRequest, responseMap, timeoutMs, _brokerMetrics);
     brokerResponse.setBrokerReduceTimeMs(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - reduceStartTimeNs));
     return brokerResponse;
+  }
+
+  private static Iterator<Server.ServerResponse> toSingletonIterator(DataTable dataTable) {
+    try {
+      Server.ServerResponse response = Server.ServerResponse.newBuilder()
+          .setPayload(ByteString.copyFrom(dataTable.toBytes()))
+          .build();
+      return Collections.singletonList(response).iterator();
+    } catch (Exception e) {
+      LOGGER.warn("Failed to serialize cached DataTable as synthetic ServerResponse", e);
+      return Collections.emptyIterator();
+    }
   }
 
   /**
